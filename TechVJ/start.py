@@ -8,10 +8,31 @@ import pyrogram
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, UserAlreadyParticipant, InviteHashExpired, UsernameNotOccupied
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message 
-from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME
+# DB_URI add kiya gaya hai
+from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME, DB_URI
 from database.db import db
 from TechVJ.strings import HELP_TXT
 from bot import TechVJUser
+
+# ======= MONGODB CUSTOM CHANNEL SETUP =======
+from motor.motor_asyncio import AsyncIOMotorClient
+
+db_client = AsyncIOMotorClient(DB_URI)
+custom_db = db_client["VJ_Bot_DB"]
+custom_channels_col = custom_db["custom_channels"]
+
+async def set_user_channel(user_id, channel_id):
+    await custom_channels_col.update_one({"user_id": user_id}, {"$set": {"channel_id": channel_id}}, upsert=True)
+
+async def del_user_channel(user_id):
+    await custom_channels_col.delete_one({"user_id": user_id})
+
+async def get_user_channel(user_id):
+    doc = await custom_channels_col.find_one({"user_id": user_id})
+    return doc["channel_id"] if doc else None
+
+WAIT_FOR_FORWARD = {}
+# ============================================
 
 class batch_temp(object):
     IS_BATCH = {}
@@ -94,7 +115,38 @@ async def send_cancel(client: Client, message: Message):
         text="**Batch Successfully Cancelled.**"
     )
 
-@Client.on_message(filters.text & filters.private)
+# ======= CUSTOM CHANNEL COMMANDS =======
+@Client.on_message(filters.command(["setchannel"]) & filters.private)
+async def set_channel_cmd(client: Client, message: Message):
+    WAIT_FOR_FORWARD[message.chat.id] = True
+    await message.reply_text(
+        "**Apne naye channel se koi bhi ek message yahan forward karo.**\n\n"
+        "(⚠️ Dhyaan rahe: Message forward karne se pehle bot ko us channel me Admin zaroor bana dena!)"
+    )
+
+@Client.on_message(filters.private & filters.forwarded)
+async def catch_forward(client: Client, message: Message):
+    if WAIT_FOR_FORWARD.get(message.chat.id):
+        if message.forward_from_chat:
+            channel_id = message.forward_from_chat.id
+            await set_user_channel(message.chat.id, channel_id)
+            WAIT_FOR_FORWARD[message.chat.id] = False
+            await message.reply_text(
+                f"✅ **Aapka custom channel set ho gaya hai!**\n\n"
+                f"**Channel ID:** `{channel_id}`\n\n"
+                f"📁 Database me save ho gaya hai. Bot restart hone par bhi reset nahi hoga."
+            )
+        else:
+            await message.reply_text("❌ Ye message kisi channel se forward nahi kiya gaya hai ya us channel ki privacy hidden hai. Dobara try karein.")
+        return # Forward pakadne ke baad niche aam text wale function me nahi jane dena
+
+@Client.on_message(filters.command(["delchannel"]) & filters.private)
+async def del_channel_cmd(client: Client, message: Message):
+    await del_user_channel(message.chat.id)
+    await message.reply_text("✅ **Aapka custom channel database se hata diya gaya hai.** Ab files wapas Default channel me aayengi.")
+# ========================================
+
+@Client.on_message(filters.text & filters.private & ~filters.forwarded)
 async def save(client: Client, message: Message):
     # Joining chat
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
@@ -175,7 +227,19 @@ async def save(client: Client, message: Message):
                     await client.send_message(message.chat.id, "The username is not occupied by anyone", reply_to_message_id=message.id)
                     return
                 try:
-                    await client.copy_message(message.chat.id, msg.chat.id, msg.id, reply_to_message_id=message.id)
+                    # ==== Target Channel Check for Public ====
+                    custom_channel = await get_user_channel(message.chat.id)
+                    if custom_channel:
+                        target_chat = custom_channel
+                    elif CHANNEL_ID:
+                        try:
+                            target_chat = int(CHANNEL_ID)
+                        except:
+                            target_chat = message.chat.id
+                    else:
+                        target_chat = message.chat.id
+                        
+                    await client.copy_message(target_chat, msg.chat.id, msg.id, reply_to_message_id=message.id)
                 except:
                     try:    
                         await handle_private(client, acc, message, username, msgid)               
@@ -199,13 +263,20 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if msg.empty: return 
     msg_type = get_message_type(msg)
     if not msg_type: return 
-    if CHANNEL_ID:
+    
+    # ==== Database Check Custom Channel ====
+    custom_channel = await get_user_channel(message.chat.id)
+    if custom_channel:
+        chat = custom_channel
+    elif CHANNEL_ID:
         try:
             chat = int(CHANNEL_ID)
         except:
             chat = message.chat.id
     else:
         chat = message.chat.id
+    # =======================================
+
     if batch_temp.IS_BATCH.get(message.from_user.id): return 
     if "Text" == msg_type:
         try:
@@ -299,7 +370,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     elif "Photo" == msg_type:
         try:
             await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-        except:
+        except Exception as e:
             if ERROR_MESSAGE == True:
                 await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
     
