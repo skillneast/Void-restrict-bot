@@ -11,7 +11,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME
 from database.db import db
-from TechVJ.strings import HELP_TXT
 from bot import TechVJUser
 
 # ======= MONGODB CUSTOM CHANNEL SETUP =======
@@ -86,28 +85,78 @@ def progress(current, total, message, type):
     with open(f'{message.id}{type}status.txt', "w") as fileup:
         fileup.write(f"{current * 100 / total:.1f}%")
 
+
+# ================= COMMANDS =================
 @Client.on_message(filters.command(["start"]))
 async def send_start(client: Client, message: Message):
     if not await db.is_user_exist(message.from_user.id):
         await db.add_user(message.from_user.id, message.from_user.first_name)
+    
+    # Naye Buttons Aapke requirement ke hisaab se
     buttons = [[
-        InlineKeyboardButton("❣️ Developer", url = "https://t.me/kingvj01")
+        InlineKeyboardButton("❣️ Developer", url="https://t.me/skillneast")
     ],[
-        InlineKeyboardButton('🔍 sᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/vj_bot_disscussion'),
-        InlineKeyboardButton('🤖 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/vj_bots')
+        InlineKeyboardButton('🌟 OG Channel', url='https://t.me/skillneastreal'),
+        InlineKeyboardButton('🤖 Update Channel', url='https://t.me/skillneast')
     ]]
     reply_markup = InlineKeyboardMarkup(buttons)
-    # 👇 YAHAN MAINE CHECKING KE LIYE (UPDATED VERSION ✅) LIKHA HAI 👇
+    
+    start_text = f"""<b>👋 Hello {message.from_user.mention}!
+
+I am an Advanced Save Restricted Content Bot. 🚀
+I can help you extract and save restricted content from private channels and groups.
+
+🌟 Main Features:
+• Bypass restricted channels protection.
+• Custom Dump Channel support.
+• Batch downloading support.
+• Login via Session to access private chats.
+
+Check /help to see all available commands!</b>"""
+
     await client.send_message(
         chat_id=message.chat.id, 
-        text=f"<b>👋 Hi {message.from_user.mention}, I am Save Restricted Content Bot (UPDATED VERSION ✅). I can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>", 
+        text=start_text, 
         reply_markup=reply_markup, 
         reply_to_message_id=message.id
     )
 
 @Client.on_message(filters.command(["help"]))
 async def send_help(client: Client, message: Message):
-    await client.send_message(chat_id=message.chat.id, text=f"{HELP_TXT}")
+    help_text = """<b>🛠 Available Commands & Features:
+
+/start - Check if the bot is alive and working.
+/help - Show this help message with all command details.
+/login - Login with your Telegram session to download from private/restricted channels.
+/logout - Remove your logged-in session.
+/setchannel - Set a Custom Dump Channel. Forward a message from your channel to the bot, and all extracted files will be sent there. (Make sure Bot is Admin in that channel).
+/delchannel - Remove your Custom Dump Channel and save files to the default location.
+/batch - Learn how to download multiple posts at once (Batch Download).
+/cancel - Cancel any ongoing batch downloading process.
+
+📥 How to download:
+Just send the Telegram message link!
+Example: <code>https://t.me/channelname/101</code></b>"""
+    await client.send_message(chat_id=message.chat.id, text=help_text)
+
+@Client.on_message(filters.command(["batch"]))
+async def send_batch_info(client: Client, message: Message):
+    batch_text = """<b>📦 How to use Batch Download Feature:
+
+You can download multiple files at once by sending a link with a range!
+
+Format:
+<code>https://t.me/channelname/100-110</code>
+
+Instructions:
+1. Copy the link of the FIRST post (e.g., ID 100).
+2. Add a hyphen <code>-</code> followed by the ID of the LAST post (e.g., ID 110).
+3. Send it to the bot.
+
+⚠️ Note:
+• Make sure there are NO spaces between the numbers.
+• Do not request too many files at once (e.g., 1000 files) to avoid FloodWait ban. Try 10-20 files at a time.</b>"""
+    await client.send_message(chat_id=message.chat.id, text=batch_text)
 
 @Client.on_message(filters.command(["cancel"]))
 async def send_cancel(client: Client, message: Message):
@@ -116,15 +165,16 @@ async def send_cancel(client: Client, message: Message):
 
 
 # ======= CUSTOM CHANNEL COMMANDS =======
-@Client.on_message(filters.command(["setchannel"]) & filters.private)
+@Client.on_message(filters.command(["setchannel"]) & filters.private, group=-1)
 async def set_channel_cmd(client: Client, message: Message):
     WAIT_FOR_FORWARD[message.chat.id] = True
     await message.reply_text(
         "<b>Please forward a message from your channel.</b>\n\n"
         "(Make sure the bot is an Admin in that channel first!)"
     )
+    message.stop_propagation()
 
-@Client.on_message(filters.private & filters.forwarded)
+@Client.on_message(filters.private & filters.forwarded, group=-1)
 async def catch_forward(client: Client, message: Message):
     if WAIT_FOR_FORWARD.get(message.chat.id):
         if message.forward_from_chat:
@@ -138,15 +188,17 @@ async def catch_forward(client: Client, message: Message):
             )
         else:
             await message.reply_text("❌ This is not a valid channel forward. The channel might be restricted or privacy is hidden. Please try again.")
+        message.stop_propagation()
 
-@Client.on_message(filters.command(["delchannel"]) & filters.private)
+@Client.on_message(filters.command(["delchannel"]) & filters.private, group=-1)
 async def del_channel_cmd(client: Client, message: Message):
     await del_user_channel(message.chat.id)
     await message.reply_text("✅ **Channel is deleted!**\nFiles will now be saved in the default channel.")
+    message.stop_propagation()
 # ========================================
 
-# Sab commands aur forwards hata diye gaye taaki purana logic clash na kare
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel"]) & ~filters.forwarded)
+# Updated filters to exclude /batch from normal saving
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel", "batch"]) & ~filters.forwarded)
 async def save(client: Client, message: Message):
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
         if TechVJUser is None:
