@@ -97,9 +97,10 @@ async def send_start(client: Client, message: Message):
         InlineKeyboardButton('🤖 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/vj_bots')
     ]]
     reply_markup = InlineKeyboardMarkup(buttons)
+    # 👇 YAHAN MAINE CHECKING KE LIYE (UPDATED VERSION ✅) LIKHA HAI 👇
     await client.send_message(
         chat_id=message.chat.id, 
-        text=f"<b>👋 Hi {message.from_user.mention}, I am Save Restricted Content Bot, I can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>", 
+        text=f"<b>👋 Hi {message.from_user.mention}, I am Save Restricted Content Bot (UPDATED VERSION ✅). I can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>", 
         reply_markup=reply_markup, 
         reply_to_message_id=message.id
     )
@@ -115,16 +116,15 @@ async def send_cancel(client: Client, message: Message):
 
 
 # ======= CUSTOM CHANNEL COMMANDS =======
-@Client.on_message(filters.command(["setchannel"]) & filters.private, group=-1)
+@Client.on_message(filters.command(["setchannel"]) & filters.private)
 async def set_channel_cmd(client: Client, message: Message):
     WAIT_FOR_FORWARD[message.chat.id] = True
     await message.reply_text(
         "<b>Please forward a message from your channel.</b>\n\n"
         "(Make sure the bot is an Admin in that channel first!)"
     )
-    message.stop_propagation()
 
-@Client.on_message(filters.private & filters.forwarded, group=-1)
+@Client.on_message(filters.private & filters.forwarded)
 async def catch_forward(client: Client, message: Message):
     if WAIT_FOR_FORWARD.get(message.chat.id):
         if message.forward_from_chat:
@@ -138,16 +138,14 @@ async def catch_forward(client: Client, message: Message):
             )
         else:
             await message.reply_text("❌ This is not a valid channel forward. The channel might be restricted or privacy is hidden. Please try again.")
-        message.stop_propagation()
 
-@Client.on_message(filters.command(["delchannel"]) & filters.private, group=-1)
+@Client.on_message(filters.command(["delchannel"]) & filters.private)
 async def del_channel_cmd(client: Client, message: Message):
     await del_user_channel(message.chat.id)
     await message.reply_text("✅ **Channel is deleted!**\nFiles will now be saved in the default channel.")
-    message.stop_propagation()
 # ========================================
 
-
+# Sab commands aur forwards hata diye gaye taaki purana logic clash na kare
 @Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel"]) & ~filters.forwarded)
 async def save(client: Client, message: Message):
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
