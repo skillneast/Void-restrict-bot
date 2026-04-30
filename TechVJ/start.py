@@ -39,7 +39,7 @@ try:
         doc = await custom_channels_col.find_one({"user_id": user_id})
         return doc["channel_id"] if doc else None
 except Exception as e:
-    # Agar Database fail hua toh memory me save karega (Bot crash nahi hoga)
+    # Fallback memory
     user_channels = {}
     async def set_user_channel(user_id, channel_id):
         user_channels[user_id] = channel_id
@@ -68,7 +68,6 @@ async def downstatus(client, statusfile, message, chat):
         except:
             await asyncio.sleep(5)
 
-
 async def upstatus(client, statusfile, message, chat):
     while True:
         if os.path.exists(statusfile):
@@ -83,11 +82,9 @@ async def upstatus(client, statusfile, message, chat):
         except:
             await asyncio.sleep(5)
 
-
 def progress(current, total, message, type):
     with open(f'{message.id}{type}status.txt', "w") as fileup:
         fileup.write(f"{current * 100 / total:.1f}%")
-
 
 @Client.on_message(filters.command(["start"]))
 async def send_start(client: Client, message: Message):
@@ -107,11 +104,9 @@ async def send_start(client: Client, message: Message):
         reply_to_message_id=message.id
     )
 
-
 @Client.on_message(filters.command(["help"]))
 async def send_help(client: Client, message: Message):
     await client.send_message(chat_id=message.chat.id, text=f"{HELP_TXT}")
-
 
 @Client.on_message(filters.command(["cancel"]))
 async def send_cancel(client: Client, message: Message):
@@ -120,15 +115,16 @@ async def send_cancel(client: Client, message: Message):
 
 
 # ======= CUSTOM CHANNEL COMMANDS =======
-@Client.on_message(filters.command(["setchannel"]) & filters.private)
+@Client.on_message(filters.command(["setchannel"]) & filters.private, group=-1)
 async def set_channel_cmd(client: Client, message: Message):
     WAIT_FOR_FORWARD[message.chat.id] = True
     await message.reply_text(
         "<b>Please forward a message from your channel.</b>\n\n"
         "(Make sure the bot is an Admin in that channel first!)"
     )
+    message.stop_propagation()
 
-@Client.on_message(filters.private & filters.forwarded)
+@Client.on_message(filters.private & filters.forwarded, group=-1)
 async def catch_forward(client: Client, message: Message):
     if WAIT_FOR_FORWARD.get(message.chat.id):
         if message.forward_from_chat:
@@ -142,15 +138,16 @@ async def catch_forward(client: Client, message: Message):
             )
         else:
             await message.reply_text("❌ This is not a valid channel forward. The channel might be restricted or privacy is hidden. Please try again.")
-        return
+        message.stop_propagation()
 
-@Client.on_message(filters.command(["delchannel"]) & filters.private)
+@Client.on_message(filters.command(["delchannel"]) & filters.private, group=-1)
 async def del_channel_cmd(client: Client, message: Message):
     await del_user_channel(message.chat.id)
     await message.reply_text("✅ **Channel is deleted!**\nFiles will now be saved in the default channel.")
+    message.stop_propagation()
 # ========================================
 
-# Yahan filters me changes kiye gaye hain taaki command aur link mix na ho
+
 @Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel"]) & ~filters.forwarded)
 async def save(client: Client, message: Message):
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
