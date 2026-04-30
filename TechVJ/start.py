@@ -5,13 +5,14 @@
 import os
 import asyncio 
 import pyrogram
+import time
+import math
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, UserAlreadyParticipant, InviteHashExpired, UsernameNotOccupied
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message 
 
 from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME
 from database.db import db
-from TechVJ.strings import HELP_TXT
 from bot import TechVJUser
 
 # ======= MONGODB CUSTOM CHANNEL SETUP =======
@@ -46,7 +47,7 @@ except Exception as e:
     async def get_user_channel(user_id): return user_channels.get(user_id, None)
 # ============================================
 
-# ======== BATCH & PROGRESS TRACKER ========
+# ======== PROGRESS BAR & BATCH TRACKER ========
 BATCH_DATA = {}
 
 class batch_temp(object):
@@ -61,15 +62,46 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def progress(current, total, message, type_):
+def get_readable_time(seconds):
+    count = 0
+    ping_time = ""
+    time_list =[]
+    time_suffix_list = ["s", "m", "h", "days"]
+    while count < 4:
+        count += 1
+        remainder, result = divmod(seconds, 60) if count < 3 else divmod(seconds, 24)
+        if seconds == 0 and remainder == 0:
+            break
+        time_list.append(int(result))
+        seconds = int(remainder)
+    for x in range(len(time_list)):
+        time_list[x] = str(time_list[x]) + time_suffix_list[x]
+    if len(time_list) == 4:
+        ping_time += time_list.pop() + ", "
+    time_list.reverse()
+    ping_time += ":".join(time_list)
+    return ping_time if ping_time else "0s"
+
+def progress(current, total, message, type_, start_time):
+    now = time.time()
+    diff = now - start_time
+    if diff == 0: diff = 1
     if total == 0: total = 1
+    
     percent = current * 100 / total
-    done = int(percent / 10)
+    done = math.floor(percent / 10)
     bar = "█" * done + "░" * (10 - done)
+    
+    speed = current / diff
     c_size = format_bytes(current)
     t_size = format_bytes(total)
+    speed_str = format_bytes(speed) + "/s"
     
-    text = f"**{percent:.2f}%**\n`{bar}`\n**Size:** `{c_size} / {t_size}`"
+    eta = (total - current) / speed if speed > 0 else 0
+    eta_str = get_readable_time(eta)
+    
+    text = f"**{percent:.2f}%**\n`[{bar}]`\n📦 **Size:** `{c_size} / {t_size}`\n🚀 **Speed:** `{speed_str}`\n⏳ **ETA:** `{eta_str}`"
+    
     with open(f'{message.id}{type_}status.txt', "w", encoding="utf-8") as fileup:
         fileup.write(text)
 
@@ -89,17 +121,19 @@ async def downstatus(client, statusfile, smsg, chat, user_id):
             t_fail = batch.get("failed", 0)
             t_rem = t_total - t_comp - t_fail
             
-            msg_text = (
-                f"📥 **Downloading...**\n"
-                f"{txt}\n\n"
-                f"📊 **Batch Status:**\n"
-                f"🔹 Total: `{t_total}`  |  ⏳ Rem: `{t_rem}`\n"
-                f"✅ Done: `{t_comp}`  |  ❌ Fail: `{t_fail}`"
-            )
+            batch_text = ""
+            if t_total > 1:
+                batch_text = (
+                    f"\n\n📊 **Batch Status:**\n"
+                    f"🔹 **Total:** `{t_total}`  |  ⏳ **Rem:** `{t_rem}`\n"
+                    f"✅ **Done:** `{t_comp}`  |  ❌ **Fail:** `{t_fail}`"
+                )
+            
+            msg_text = f"📥 **Downloading...**\n\n{txt}{batch_text}"
             await client.edit_message_text(chat, smsg.id, msg_text)
-            await asyncio.sleep(5)
+            await asyncio.sleep(4)
         except Exception:
-            await asyncio.sleep(5)
+            await asyncio.sleep(4)
 
 async def upstatus(client, statusfile, smsg, chat, user_id):
     while True:
@@ -116,41 +150,92 @@ async def upstatus(client, statusfile, smsg, chat, user_id):
             t_fail = batch.get("failed", 0)
             t_rem = t_total - t_comp - t_fail
             
-            msg_text = (
-                f"📤 **Uploading...**\n"
-                f"{txt}\n\n"
-                f"📊 **Batch Status:**\n"
-                f"🔹 Total: `{t_total}`  |  ⏳ Rem: `{t_rem}`\n"
-                f"✅ Done: `{t_comp}`  |  ❌ Fail: `{t_fail}`"
-            )
+            batch_text = ""
+            if t_total > 1:
+                batch_text = (
+                    f"\n\n📊 **Batch Status:**\n"
+                    f"🔹 **Total:** `{t_total}`  |  ⏳ **Rem:** `{t_rem}`\n"
+                    f"✅ **Done:** `{t_comp}`  |  ❌ **Fail:** `{t_fail}`"
+                )
+            
+            msg_text = f"📤 **Uploading...**\n\n{txt}{batch_text}"
             await client.edit_message_text(chat, smsg.id, msg_text)
-            await asyncio.sleep(5)
+            await asyncio.sleep(4)
         except Exception:
-            await asyncio.sleep(5)
+            await asyncio.sleep(4)
 # ==========================================
 
 
+# ================= COMMANDS =================
 @Client.on_message(filters.command(["start"]))
 async def send_start(client: Client, message: Message):
     if not await db.is_user_exist(message.from_user.id):
         await db.add_user(message.from_user.id, message.from_user.first_name)
+    
     buttons = [[
-        InlineKeyboardButton("❣️ Developer", url = "https://t.me/kingvj01")
+        InlineKeyboardButton("❣️ Developer", url="https://t.me/skillneast")
     ],[
-        InlineKeyboardButton('🔍 sᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/vj_bot_disscussion'),
-        InlineKeyboardButton('🤖 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ', url='https://t.me/vj_bots')
+        InlineKeyboardButton('🌟 OG Channel', url='https://t.me/skillneastreal'),
+        InlineKeyboardButton('🤖 Update Channel', url='https://t.me/skillneast')
     ]]
     reply_markup = InlineKeyboardMarkup(buttons)
+    
+    start_text = f"""<b>👋 Hello {message.from_user.mention}!
+
+I am an Advanced Save Restricted Content Bot (PREMIUM ✅).
+I can help you extract and save restricted content from private channels and groups.
+
+🌟 Main Features:
+• Custom Dump Channel support.
+• Advanced Batch downloading support.
+• Animated Progress & Speed tracking.
+• Login via Session to access private chats.
+
+Check /help to see all available commands!</b>"""
+
     await client.send_message(
         chat_id=message.chat.id, 
-        text=f"<b>👋 Hi {message.from_user.mention}, I am Save Restricted Content Bot (PREMIUM VERSION ✨). I can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>", 
+        text=start_text, 
         reply_markup=reply_markup, 
         reply_to_message_id=message.id
     )
 
 @Client.on_message(filters.command(["help"]))
 async def send_help(client: Client, message: Message):
-    await client.send_message(chat_id=message.chat.id, text=f"{HELP_TXT}")
+    help_text = """<b>🛠 Available Commands & Features:
+
+/start - Check if the bot is alive and working.
+/help - Show this help message with all command details.
+/login - Login with your Telegram session to download from private/restricted channels.
+/logout - Remove your logged-in session.
+/setchannel - Set a Custom Dump Channel. Forward a message from your channel to the bot, and all extracted files will be sent there. (Make sure Bot is Admin in that channel).
+/delchannel - Remove your Custom Dump Channel and save files to the default location.
+/batch - Learn how to download multiple posts at once (Batch Download).
+/cancel - Cancel any ongoing batch downloading process.
+
+📥 How to download:
+Just send the Telegram message link!
+Example: <code>https://t.me/channelname/101</code></b>"""
+    await client.send_message(chat_id=message.chat.id, text=help_text)
+
+@Client.on_message(filters.command(["batch"]))
+async def send_batch_info(client: Client, message: Message):
+    batch_text = """<b>📦 How to use Batch Download Feature:
+
+You can download multiple files at once by sending a link with a range!
+
+Format:
+<code>https://t.me/channelname/100-110</code>
+
+Instructions:
+1. Copy the link of the FIRST post (e.g., ID 100).
+2. Add a hyphen <code>-</code> followed by the ID of the LAST post (e.g., ID 110).
+3. Send it to the bot.
+
+⚠️ Note:
+• Make sure there are NO spaces between the numbers.
+• Do not request too many files at once (e.g., 1000 files) to avoid FloodWait ban. Try 10-20 files at a time.</b>"""
+    await client.send_message(chat_id=message.chat.id, text=batch_text)
 
 @Client.on_message(filters.command(["cancel"]))
 async def send_cancel(client: Client, message: Message):
@@ -191,14 +276,15 @@ async def del_channel_cmd(client: Client, message: Message):
     message.stop_propagation()
 # ========================================
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel"]) & ~filters.forwarded)
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "cancel", "setchannel", "delchannel", "batch"]) & ~filters.forwarded)
 async def save(client: Client, message: Message):
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
         if TechVJUser is None:
             await client.send_message(message.chat.id, "String Session is not Set", reply_to_message_id=message.id)
             return
         try:
-            try: await TechVJUser.join_chat(message.text)
+            try:
+                await TechVJUser.join_chat(message.text)
             except Exception as e: 
                 await client.send_message(message.chat.id, f"Error : {e}", reply_to_message_id=message.id)
                 return
@@ -238,7 +324,7 @@ async def save(client: Client, message: Message):
 				
         batch_temp.IS_BATCH[message.from_user.id] = False
         
-        # Batch Data Init
+        # Batch Data Initialization
         total_tasks = toID - fromID + 1
         BATCH_DATA[message.from_user.id] = {"total": total_tasks, "completed": 0, "failed": 0}
 
@@ -259,7 +345,8 @@ async def save(client: Client, message: Message):
                     username = datas[3]
                     try:
                         msg = await client.get_messages(username, msgid)
-                        if msg.empty: is_success = False
+                        if msg.empty: 
+                            is_success = False
                         else:
                             custom_channel = await get_user_channel(message.chat.id)
                             target_chat = custom_channel if custom_channel else (int(CHANNEL_ID) if CHANNEL_ID else message.chat.id)
@@ -269,18 +356,14 @@ async def save(client: Client, message: Message):
                         await client.send_message(message.chat.id, "The username is not occupied by anyone", reply_to_message_id=message.id)
                         is_success = False
                     except Exception:
-                        try:    
-                            is_success = await handle_private(client, acc, message, username, msgid)               
-                        except Exception as e:
-                            is_success = False
-            except Exception as e:
+                        try: is_success = await handle_private(client, acc, message, username, msgid)               
+                        except: is_success = False
+            except:
                 is_success = False
 
-            # Update Batch Progress
-            if is_success:
-                BATCH_DATA[message.from_user.id]["completed"] += 1
-            else:
-                BATCH_DATA[message.from_user.id]["failed"] += 1
+            # Update Tracker
+            if is_success: BATCH_DATA[message.from_user.id]["completed"] += 1
+            else: BATCH_DATA[message.from_user.id]["failed"] += 1
 
             await asyncio.sleep(WAITING_TIME)
             
@@ -288,12 +371,17 @@ async def save(client: Client, message: Message):
             try: await acc.disconnect()
             except: pass                				
         
-        # Final Completion Message
+        # Final Summary for Batch
         if not batch_temp.IS_BATCH.get(message.from_user.id) and total_tasks > 1:
             t_total = BATCH_DATA[message.from_user.id]["total"]
             t_comp = BATCH_DATA[message.from_user.id]["completed"]
             t_fail = BATCH_DATA[message.from_user.id]["failed"]
-            await message.reply_text(f"🎉 **Batch Processing Completed!**\n\n🔹 Total Tasks: `{t_total}`\n✅ Completed: `{t_comp}`\n❌ Failed: `{t_fail}`")
+            await message.reply_text(
+                f"🎉 **Batch Processing Completed!**\n\n"
+                f"🔹 **Total Tasks:** `{t_total}`\n"
+                f"✅ **Successful:** `{t_comp}`\n"
+                f"❌ **Failed:** `{t_fail}`"
+            )
 
         batch_temp.IS_BATCH[message.from_user.id] = True
 
@@ -306,12 +394,12 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         return False
         
     msg_type = get_message_type(msg)
-    if not msg_type: return False
+    if not msg_type: return False 
 
     custom_channel = await get_user_channel(message.chat.id)
     chat = custom_channel if custom_channel else (int(CHANNEL_ID) if CHANNEL_ID else message.chat.id)
 
-    if batch_temp.IS_BATCH.get(message.from_user.id): return False 
+    if batch_temp.IS_BATCH.get(message.from_user.id): return False
     if "Text" == msg_type:
         try:
             await client.send_message(chat, msg.text, entities=msg.entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
@@ -324,8 +412,9 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     smsg = await client.send_message(message.chat.id, '**Downloading...**', reply_to_message_id=message.id)
     asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, message.chat.id, message.from_user.id)) 
     
+    start_time = time.time()
     try:
-        file = await acc.download_media(msg, progress=progress, progress_args=[message,"down"])
+        file = await acc.download_media(msg, progress=progress, progress_args=[message,"down", start_time])
         if os.path.exists(f'{message.id}downstatus.txt'): os.remove(f'{message.id}downstatus.txt')
     except Exception as e:
         if ERROR_MESSAGE == True:
@@ -340,18 +429,19 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if batch_temp.IS_BATCH.get(message.from_user.id): return False 
             
     is_success = False
+    start_time = time.time()
     try:
         if "Document" == msg_type:
             try: ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_document(chat, file, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up"])
+            await client.send_document(chat, file, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
             if ph_path != None: os.remove(ph_path)
             is_success = True
             
         elif "Video" == msg_type:
             try: ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_video(chat, file, duration=msg.video.duration, width=msg.video.width, height=msg.video.height, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up"])
+            await client.send_video(chat, file, duration=msg.video.duration, width=msg.video.width, height=msg.video.height, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
             if ph_path != None: os.remove(ph_path)
             is_success = True
 
@@ -364,46 +454,10 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             is_success = True
 
         elif "Voice" == msg_type:
-            await client.send_voice(chat, file, caption=caption, caption_entities=msg.caption_entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up"])
+            await client.send_voice(chat, file, caption=caption, caption_entities=msg.caption_entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
             is_success = True
 
         elif "Audio" == msg_type:
             try: ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_audio(chat, file, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up"])   
-            if ph_path != None: os.remove(ph_path)
-            is_success = True
-
-        elif "Photo" == msg_type:
-            await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-            is_success = True
-
-    except Exception as e:
-        if ERROR_MESSAGE == True:
-            await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-        is_success = False
-
-    if os.path.exists(f'{message.id}upstatus.txt'): 
-        os.remove(f'{message.id}upstatus.txt')
-    if file and os.path.exists(file):
-        os.remove(file)
-    await client.delete_messages(message.chat.id,[smsg.id])
-    return is_success
-
-def get_message_type(msg: pyrogram.types.messages_and_media.message.Message):
-    try: msg.document.file_id; return "Document"
-    except: pass
-    try: msg.video.file_id; return "Video"
-    except: pass
-    try: msg.animation.file_id; return "Animation"
-    except: pass
-    try: msg.sticker.file_id; return "Sticker"
-    except: pass
-    try: msg.voice.file_id; return "Voice"
-    except: pass
-    try: msg.audio.file_id; return "Audio"
-    except: pass
-    try: msg.photo.file_id; return "Photo"
-    except: pass
-    try: msg.text; return "Text"
-    except: pass
+            await client.send_audio(chat, file, thumb=ph_path,
