@@ -350,7 +350,12 @@ async def save(client: Client, message: Message):
                         else:
                             custom_channel = await get_user_channel(message.chat.id)
                             target_chat = custom_channel if custom_channel else (int(CHANNEL_ID) if CHANNEL_ID else message.chat.id)
-                            await client.copy_message(target_chat, msg.chat.id, msg.id, reply_to_message_id=message.id)
+                            await client.copy_message(
+                                chat_id=target_chat,
+                                from_chat_id=msg.chat.id,
+                                message_id=msg.id,
+                                reply_to_message_id=message.id
+                            )
                             is_success = True
                     except UsernameNotOccupied: 
                         await client.send_message(message.chat.id, "The username is not occupied by anyone", reply_to_message_id=message.id)
@@ -402,7 +407,13 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if batch_temp.IS_BATCH.get(message.from_user.id): return False
     if "Text" == msg_type:
         try:
-            await client.send_message(chat, msg.text, entities=msg.entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+            await client.send_message(
+                chat_id=chat,
+                text=msg.text,
+                entities=msg.entities,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML
+            )
             return True
         except Exception as e:
             if ERROR_MESSAGE == True:
@@ -414,7 +425,11 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     
     start_time = time.time()
     try:
-        file = await acc.download_media(msg, progress=progress, progress_args=[message,"down", start_time])
+        file = await acc.download_media(
+            message=msg,
+            progress=progress,
+            progress_args=[message, "down", start_time]
+        )
         if os.path.exists(f'{message.id}downstatus.txt'): os.remove(f'{message.id}downstatus.txt')
     except Exception as e:
         if ERROR_MESSAGE == True:
@@ -434,30 +449,120 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         if "Document" == msg_type:
             try: ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_document(chat, file, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
+            await client.send_document(
+                chat_id=chat,
+                document=file,
+                thumb=ph_path,
+                caption=caption,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML,
+                progress=progress,
+                progress_args=[message, "up", start_time]
+            )
             if ph_path != None: os.remove(ph_path)
             is_success = True
             
         elif "Video" == msg_type:
             try: ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_video(chat, file, duration=msg.video.duration, width=msg.video.width, height=msg.video.height, thumb=ph_path, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
+            await client.send_video(
+                chat_id=chat,
+                video=file,
+                duration=msg.video.duration,
+                width=msg.video.width,
+                height=msg.video.height,
+                thumb=ph_path,
+                caption=caption,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML,
+                progress=progress,
+                progress_args=[message, "up", start_time]
+            )
             if ph_path != None: os.remove(ph_path)
             is_success = True
 
         elif "Animation" == msg_type:
-            await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+            await client.send_animation(
+                chat_id=chat,
+                animation=file,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML
+            )
             is_success = True
             
         elif "Sticker" == msg_type:
-            await client.send_sticker(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+            await client.send_sticker(
+                chat_id=chat,
+                sticker=file,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML
+            )
             is_success = True
 
         elif "Voice" == msg_type:
-            await client.send_voice(chat, file, caption=caption, caption_entities=msg.caption_entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, progress=progress, progress_args=[message,"up", start_time])
+            await client.send_voice(
+                chat_id=chat,
+                voice=file,
+                caption=caption,
+                caption_entities=msg.caption_entities,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML,
+                progress=progress,
+                progress_args=[message, "up", start_time]
+            )
             is_success = True
 
         elif "Audio" == msg_type:
             try: ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
             except: ph_path = None
-            await client.send_audio(chat, file, thumb=ph_path,
+            await client.send_audio(
+                chat_id=chat,
+                audio=file,
+                thumb=ph_path,
+                caption=caption,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML,
+                progress=progress,
+                progress_args=[message, "up", start_time]
+            )   
+            if ph_path != None: os.remove(ph_path)
+            is_success = True
+
+        elif "Photo" == msg_type:
+            await client.send_photo(
+                chat_id=chat,
+                photo=file,
+                caption=caption,
+                reply_to_message_id=message.id,
+                parse_mode=enums.ParseMode.HTML
+            )
+            is_success = True
+
+    except Exception as e:
+        if ERROR_MESSAGE == True:
+            await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+        is_success = False
+    
+    if os.path.exists(f'{message.id}upstatus.txt'): os.remove(f'{message.id}upstatus.txt')
+    if file and os.path.exists(file): os.remove(file)
+    await client.delete_messages(message.chat.id,[smsg.id])
+    
+    return is_success
+
+def get_message_type(msg: pyrogram.types.messages_and_media.message.Message):
+    try: msg.document.file_id; return "Document"
+    except: pass
+    try: msg.video.file_id; return "Video"
+    except: pass
+    try: msg.animation.file_id; return "Animation"
+    except: pass
+    try: msg.sticker.file_id; return "Sticker"
+    except: pass
+    try: msg.voice.file_id; return "Voice"
+    except: pass
+    try: msg.audio.file_id; return "Audio"
+    except: pass
+    try: msg.photo.file_id; return "Photo"
+    except: pass
+    try: msg.text; return "Text"
+    except: pass
