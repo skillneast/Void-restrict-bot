@@ -8,30 +8,48 @@ import pyrogram
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, UserAlreadyParticipant, InviteHashExpired, UsernameNotOccupied
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message 
-# DB_URI add kiya gaya hai
-from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME, DB_URI
+from pyrogram import ContinuePropagation
+
+from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME
 from database.db import db
 from TechVJ.strings import HELP_TXT
 from bot import TechVJUser
 
 # ======= MONGODB CUSTOM CHANNEL SETUP =======
-from motor.motor_asyncio import AsyncIOMotorClient
-
-db_client = AsyncIOMotorClient(DB_URI)
-custom_db = db_client["VJ_Bot_DB"]
-custom_channels_col = custom_db["custom_channels"]
-
-async def set_user_channel(user_id, channel_id):
-    await custom_channels_col.update_one({"user_id": user_id}, {"$set": {"channel_id": channel_id}}, upsert=True)
-
-async def del_user_channel(user_id):
-    await custom_channels_col.delete_one({"user_id": user_id})
-
-async def get_user_channel(user_id):
-    doc = await custom_channels_col.find_one({"user_id": user_id})
-    return doc["channel_id"] if doc else None
-
 WAIT_FOR_FORWARD = {}
+
+import config
+# Safely getting DB_URI to prevent bot crash
+DB_URI = getattr(config, "DB_URI", os.environ.get("DB_URI", None))
+
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+    if not DB_URI:
+        raise Exception("DB_URI missing")
+        
+    db_client = AsyncIOMotorClient(DB_URI)
+    custom_db = db_client["VJ_Bot_DB"]
+    custom_channels_col = custom_db["custom_channels"]
+
+    async def set_user_channel(user_id, channel_id):
+        await custom_channels_col.update_one({"user_id": user_id}, {"$set": {"channel_id": channel_id}}, upsert=True)
+
+    async def del_user_channel(user_id):
+        await custom_channels_col.delete_one({"user_id": user_id})
+
+    async def get_user_channel(user_id):
+        doc = await custom_channels_col.find_one({"user_id": user_id})
+        return doc["channel_id"] if doc else None
+except Exception as e:
+    # Fallback memory (Agar DB fail hua toh bot crash nahi hoga)
+    user_channels = {}
+    async def set_user_channel(user_id, channel_id):
+        user_channels[user_id] = channel_id
+    async def del_user_channel(user_id):
+        if user_id in user_channels:
+            del user_channels[user_id]
+    async def get_user_channel(user_id):
+        return user_channels.get(user_id, None)
 # ============================================
 
 class batch_temp(object):
@@ -120,33 +138,39 @@ async def send_cancel(client: Client, message: Message):
 async def set_channel_cmd(client: Client, message: Message):
     WAIT_FOR_FORWARD[message.chat.id] = True
     await message.reply_text(
-        "**Apne naye channel se koi bhi ek message yahan forward karo.**\n\n"
-        "(⚠️ Dhyaan rahe: Message forward karne se pehle bot ko us channel me Admin zaroor bana dena!)"
+        "<b>Please forward a message from your channel.</b>\n\n"
+        "(Make sure the bot is an Admin in that channel first!)"
     )
 
 @Client.on_message(filters.private & filters.forwarded)
 async def catch_forward(client: Client, message: Message):
+    # Agar user ne pehle /setchannel command diya hai
     if WAIT_FOR_FORWARD.get(message.chat.id):
         if message.forward_from_chat:
             channel_id = message.forward_from_chat.id
             await set_user_channel(message.chat.id, channel_id)
             WAIT_FOR_FORWARD[message.chat.id] = False
+            
             await message.reply_text(
-                f"✅ **Aapka custom channel set ho gaya hai!**\n\n"
-                f"**Channel ID:** `{channel_id}`\n\n"
-                f"📁 Database me save ho gaya hai. Bot restart hone par bhi reset nahi hoga."
+                f"✅ **Channel is set successfully!**\n\n"
+                f"**Channel ID:** `{channel_id}`\n"
+                f"All files will now be saved in this channel."
             )
         else:
-            await message.reply_text("❌ Ye message kisi channel se forward nahi kiya gaya hai ya us channel ki privacy hidden hai. Dobara try karein.")
-        return # Forward pakadne ke baad niche aam text wale function me nahi jane dena
+            await message.reply_text("❌ This is not a valid channel forward. Please try again.")
+        return # Forward pakadne ke baad yehi ruk jaye
+    else:
+        # Agar user /setchannel nahi kar raha balki aam link forward kar raha hai toh ignore karega
+        raise ContinuePropagation 
 
 @Client.on_message(filters.command(["delchannel"]) & filters.private)
 async def del_channel_cmd(client: Client, message: Message):
     await del_user_channel(message.chat.id)
-    await message.reply_text("✅ **Aapka custom channel database se hata diya gaya hai.** Ab files wapas Default channel me aayengi.")
+    await message.reply_text("✅ **Channel is deleted!**\nFiles will now be saved in the default channel.")
 # ========================================
 
-@Client.on_message(filters.text & filters.private & ~filters.forwarded)
+
+@Client.on_message(filters.text & filters.private)
 async def save(client: Client, message: Message):
     # Joining chat
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
@@ -263,7 +287,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if msg.empty: return 
     msg_type = get_message_type(msg)
     if not msg_type: return 
-    
+
     # ==== Database Check Custom Channel ====
     custom_channel = await get_user_channel(message.chat.id)
     if custom_channel:
@@ -288,7 +312,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             return 
 
     smsg = await client.send_message(message.chat.id, '**Downloading**', reply_to_message_id=message.id)
-    asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
+    asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, message.chat.id)) # status user chat me
     try:
         file = await acc.download_media(msg, progress=progress, progress_args=[message,"down"])
         os.remove(f'{message.id}downstatus.txt')
@@ -297,7 +321,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML) 
         return await smsg.delete()
     if batch_temp.IS_BATCH.get(message.from_user.id): return 
-    asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, chat))
+    asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, message.chat.id))
 
     if msg.caption:
         caption = msg.caption
